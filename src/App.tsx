@@ -1,6 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import './App.css'; // Import custom CSS styles
-import './index.css'; // Import Tailwind CSS styles
 
 // Define the base URL for your Rails API
 // IMPORTANT: Replace 'http://localhost:3000' with the actual URL of your Rails backend
@@ -22,18 +20,36 @@ const App = () => {
     const [editTaskDescription, setEditTaskDescription] = useState('');
     // State to manage loading status
     const [loading, setLoading] = useState(true);
-    // State to manage error messages
+    // State to manage general error messages (like network issues)
     const [error, setError] = useState(null);
+    // State to manage specific validation errors from the backend
+    const [validationErrors, setValidationErrors] = useState({});
+    // State to manage feedback messages (success notices)
+    const [feedbackMessage, setFeedbackMessage] = useState(null);
+
 
     // useEffect hook to fetch tasks when the component mounts
     useEffect(() => {
         fetchTasks();
     }, []); // Empty dependency array means this runs once on mount
 
+    // useEffect hook to automatically clear feedback messages after a delay
+    useEffect(() => {
+        if (feedbackMessage) {
+            const timer = setTimeout(() => {
+                setFeedbackMessage(null);
+            }, 5000); // Clear message after 5 seconds (adjust as needed)
+            return () => clearTimeout(timer); // Clean up the timer
+        }
+    }, [feedbackMessage]); // Run this effect whenever feedbackMessage changes
+
+
     // Function to fetch tasks from the Rails backend API
     const fetchTasks = async () => {
         setLoading(true);
         setError(null);
+        setValidationErrors({});
+        setFeedbackMessage(null); // Clear messages on fetch
         try {
             // Make a GET request to the Rails tasks index endpoint using the absolute URL
             const response = await fetch(`${API_BASE_URL}/tasks`, {
@@ -60,12 +76,17 @@ const App = () => {
     const handleCreateTask = async (e) => {
         e.preventDefault(); // Prevent default form submission
 
+        // Clear previous errors and validation errors
+        setError(null);
+        setValidationErrors({});
+        setFeedbackMessage(null); // Clear feedback message
+
         if (!newTaskTitle.trim()) {
-            alert('Task title cannot be empty.'); // Simple validation
+            // Basic client-side validation
+            setValidationErrors({ title: ["Title cannot be empty."] });
             return;
         }
 
-        setError(null); // Clear previous errors
         try {
             // Make a POST request to the Rails tasks create endpoint using the absolute URL
             const response = await fetch(`${API_BASE_URL}/tasks`, {
@@ -85,24 +106,41 @@ const App = () => {
             });
 
             if (!response.ok) {
-                // Attempt to read error details from response body
-                const errorData = await response.json().catch(() => ({ message: 'Failed to create task.' }));
-                throw new Error(`HTTP error! status: ${response.status} - ${errorData.message || JSON.stringify(errorData)}`);
+                // If response status is 422 (Unprocessable Entity), it's likely validation errors
+                if (response.status === 422) {
+                    const errors = await response.json(); // Parse the validation errors from the response body
+                    console.error('Rails validation errors:', errors); // Log the specific errors
+                    setValidationErrors(errors); // Set validation errors state
+                    // We don't throw an error here, as 422 is a handled response
+                } else {
+                    // For other HTTP errors, throw a general error
+                    const errorData = await response.json().catch(() => ({ message: 'Something went wrong.' }));
+                    console.error('HTTP error:', errorData);
+                    throw new Error(`HTTP error! status: ${response.status} - ${errorData.message || JSON.stringify(errorData)}`);
+                }
+            } else {
+                 // If response is OK (e.g., 201 Created)
+                const createdTask = await response.json(); // Get the created task from the response
+                setTasks([...tasks, createdTask]); // Add the new task to the state
+                setNewTaskTitle(''); // Clear the form inputs
+                setNewTaskDescription('');
+                setValidationErrors({}); // Clear validation errors on success
+                setFeedbackMessage('Task was successfully created.'); // Set success message
             }
 
-            const createdTask = await response.json(); // Get the created task from the response
-            setTasks([...tasks, createdTask]); // Add the new task to the state
-            setNewTaskTitle(''); // Clear the form inputs
-            setNewTaskDescription('');
         } catch (err) {
             console.error('Error creating task:', err);
-            setError(`Failed to create task: ${err.message}`); // Set error state
+            // Set a general error message for network issues or unexpected errors
+            setError(`Failed to create task: ${err.message}`);
+            setValidationErrors({}); // Clear validation errors on general error
         }
     };
 
     // Function to handle deleting a task
     const handleDeleteTask = async (taskId) => {
         setError(null); // Clear previous errors
+        setValidationErrors({}); // Clear validation errors
+        setFeedbackMessage(null); // Clear feedback message
         try {
             // Make a DELETE request to the Rails tasks destroy endpoint using the absolute URL
             const response = await fetch(`${API_BASE_URL}/tasks/${taskId}`, {
@@ -115,11 +153,14 @@ const App = () => {
 
             if (!response.ok) {
                  const errorData = await response.json().catch(() => ({ message: 'Failed to delete task.' }));
+                 console.error('Rails deletion error:', errorData); // Log error data for deletion
                  throw new Error(`HTTP error! status: ${response.status} - ${errorData.message || JSON.stringify(errorData)}`);
             }
 
             // Remove the deleted task from the state
             setTasks(tasks.filter(task => task.id !== taskId));
+            setFeedbackMessage('Task was successfully deleted.'); // Set success message
+
         } catch (err) {
             console.error('Error deleting task:', err);
             setError(`Failed to delete task: ${err.message}`); // Set error state
@@ -131,6 +172,9 @@ const App = () => {
         setEditingTask(task); // Set the task being edited
         setEditTaskTitle(task.title); // Populate the edit form with current data
         setEditTaskDescription(task.description);
+        setError(null); // Clear errors
+        setValidationErrors({}); // Clear validation errors
+        setFeedbackMessage(null); // Clear feedback message
     };
 
     // Function to cancel editing
@@ -139,18 +183,26 @@ const App = () => {
         setEditTaskTitle(''); // Clear the edit form inputs
         setEditTaskDescription('');
         setError(null); // Clear errors
+        setValidationErrors({}); // Clear validation errors
+        setFeedbackMessage(null); // Clear feedback message
     };
 
     // Function to handle updating a task
     const handleUpdateTask = async (e) => {
         e.preventDefault(); // Prevent default form submission
 
+        // Clear previous errors and validation errors
+        setError(null);
+        setValidationErrors({});
+        setFeedbackMessage(null); // Clear feedback message
+
+
         if (!editTaskTitle.trim()) {
-            alert('Task title cannot be empty.'); // Simple validation
+             // Basic client-side validation
+            setValidationErrors({ title: ["Title cannot be empty."] });
             return;
         }
 
-        setError(null); // Clear previous errors
         try {
             // Make a PATCH request to the Rails tasks update endpoint using the absolute URL
             const response = await fetch(`${API_BASE_URL}/tasks/${editingTask.id}`, {
@@ -169,23 +221,54 @@ const App = () => {
             });
 
             if (!response.ok) {
-                 const errorData = await response.json().catch(() => ({ message: 'Failed to update task.' }));
-                 throw new Error(`HTTP error! status: ${response.status} - ${errorData.message || JSON.stringify(errorData)}`);
+                // If response status is 422 (Unprocessable Entity), it's likely validation errors
+                if (response.status === 422) {
+                    const errors = await response.json(); // Parse the validation errors from the response body
+                    console.error('Rails update validation errors:', errors); // Log the specific errors
+                    setValidationErrors(errors); // Set validation errors state
+                    // We don't throw an error here, as 422 is a handled response
+                } else {
+                    // For other HTTP errors, throw a general error
+                    const errorData = await response.json().catch(() => ({ message: 'Something went wrong.' }));
+                    console.error('HTTP error:', errorData);
+                    throw new Error(`HTTP error! status: ${response.status} - ${errorData.message || JSON.stringify(errorData)}`);
+                }
+            } else {
+                // If response is OK (e.g., 200 OK)
+                const updatedTask = await response.json(); // Get the updated task from the response
+
+                // Update the task in the state
+                setTasks(tasks.map(task =>
+                    task.id === updatedTask.id ? updatedTask : task
+                ));
+
+                cancelEditing(); // Exit editing mode
+                setValidationErrors({}); // Clear validation errors on success
+                setFeedbackMessage('Task was successfully updated.'); // Set success message
             }
 
-            const updatedTask = await response.json(); // Get the updated task from the response
-
-            // Update the task in the state
-            setTasks(tasks.map(task =>
-                task.id === updatedTask.id ? updatedTask : task
-            ));
-
-            cancelEditing(); // Exit editing mode
         } catch (err) {
             console.error('Error updating task:', err);
-            setError(`Failed to update task: ${err.message}`); // Set error state
+            // Set a general error message for network issues or unexpected errors
+            setError(`Failed to update task: ${err.message}`);
+            setValidationErrors({}); // Clear validation errors on general error
         }
     };
+
+    // Helper function to render validation errors for a specific field
+    const renderValidationErrors = (field) => {
+        if (validationErrors && validationErrors[field]) {
+            return (
+                <ul className="text-red-600 text-sm mt-1 list-disc list-inside">
+                    {validationErrors[field].map((msg, index) => (
+                        <li key={index}>{msg}</li>
+                    ))}
+                </ul>
+            );
+        }
+        return null;
+    };
+
 
     // Render the component UI
     return (
@@ -195,7 +278,15 @@ const App = () => {
                     Task Manager
                 </h1>
 
-                {/* Error message display */}
+                {/* Feedback message display (Success notices) */}
+                {feedbackMessage && (
+                    <div className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded relative mb-6" role="alert">
+                        <strong className="font-bold">Success!</strong>
+                        <span className="block sm:inline"> {feedbackMessage}</span>
+                    </div>
+                )}
+
+                {/* General Error message display */}
                 {error && (
                     <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-6" role="alert">
                         <strong className="font-bold">Error!</strong>
@@ -216,11 +307,12 @@ const App = () => {
                             <input
                                 type="text"
                                 id="title"
-                                className="shadow-sm appearance-none border border-gray-300 rounded-md w-full py-2.5 px-4 text-gray-800 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition duration-200 ease-in-out"
+                                className={`shadow-sm appearance-none border rounded-md w-full py-2.5 px-4 text-gray-800 leading-tight focus:outline-none focus:ring-2 transition duration-200 ease-in-out ${validationErrors.title ? 'border-red-500 focus:ring-red-500' : 'border-gray-300 focus:ring-blue-500 focus:border-transparent'}`}
                                 value={editingTask ? editTaskTitle : newTaskTitle}
                                 onChange={(e) => editingTask ? setEditTaskTitle(e.target.value) : setNewTaskTitle(e.target.value)}
                                 required
                             />
+                            {renderValidationErrors('title')}
                         </div>
                         <div className="mb-6">
                             <label htmlFor="description" className="block text-gray-700 text-sm font-semibold mb-2">
@@ -228,10 +320,11 @@ const App = () => {
                             </label>
                             <textarea
                                 id="description"
-                                className="shadow-sm appearance-none border border-gray-300 rounded-md w-full py-2.5 px-4 text-gray-800 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition duration-200 ease-in-out h-32 resize-none"
+                                className={`shadow-sm appearance-none border rounded-md w-full py-2.5 px-4 text-gray-800 leading-tight focus:outline-none focus:ring-2 transition duration-200 ease-in-out h-32 resize-none ${validationErrors.description ? 'border-red-500 focus:ring-red-500' : 'border-gray-300 focus:ring-blue-500 focus:border-transparent'}`}
                                 value={editingTask ? editTaskDescription : newTaskDescription}
                                 onChange={(e) => editingTask ? setEditTaskDescription(e.target.value) : setNewTaskDescription(e.target.value)}
                             ></textarea>
+                            {renderValidationErrors('description')}
                         </div>
                         <div className="flex items-center justify-between">
                             <button
